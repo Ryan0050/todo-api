@@ -27,10 +27,6 @@ func (ctrl *TodoController) Create(c echo.Context) error {
         return c.JSON(http.StatusBadRequest, "error The 'job' field is required")
     }
 
-	if input.Status == "" {
-        input.Status = "on progress"
-    }
-
     result, err := ctrl.svc.CreateTask(c.Request().Context(), input) 
     if err != nil {
         return c.JSON(http.StatusInternalServerError, err.Error())
