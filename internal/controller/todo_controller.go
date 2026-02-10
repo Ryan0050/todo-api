@@ -3,9 +3,12 @@ package controller
 import (
 	"net/http"
 	"strconv"
-	"todo-api/internal/entity"
+	"todo-api/internal/model/request"
+	"todo-api/internal/model/response"
 	"todo-api/internal/service"
+
 	"github.com/labstack/echo/v4"
+	"github.com/rs/zerolog/log"
 )
 
 type TodoController struct {
@@ -16,71 +19,72 @@ func NewTodoController(svc service.TodoService) *TodoController {
 	return &TodoController{svc: svc}
 }
 
-// POST /todos
-func (ctrl *TodoController) Create(c echo.Context) error {
-    var input entity.Todo
-    if err := c.Bind(&input); err != nil {
-        return c.JSON(http.StatusBadRequest, "Invalid JSON")
-    }
+func (ctrl *TodoController) Routes(e *echo.Echo) {
+	todoRoutes := e.Group("/todos")
 
-	if input.Job == "" {
-        return c.JSON(http.StatusBadRequest, "error The 'job' field is required")
-    }
-
-    result, err := ctrl.svc.CreateTask(c.Request().Context(), input) 
-    if err != nil {
-        return c.JSON(http.StatusInternalServerError, err.Error())
-    }
-    return c.JSON(http.StatusCreated, result)
+	todoRoutes.POST("/create", ctrl.Create)
+	todoRoutes.GET("/list", ctrl.GetAll)
+	todoRoutes.PUT("/update/:id", ctrl.Update)
+	todoRoutes.DELETE("/delete/:id", ctrl.Delete)
 }
 
-// GET /todos
+func (ctrl *TodoController) Create(c echo.Context) error {
+	var body = new(request.CreateTodoRequest)
+
+	if err := c.Bind(body); err != nil {
+		log.Error().Err(err).Msg("")
+		return response.ErrBadRequest.EchoError(c)
+	} else if err := c.Validate(body); err != nil {
+		log.Warn().Err(err).Msg("")
+		return response.ErrBadRequest.EchoError(c)
+	}
+
+	res, err := ctrl.svc.CreateTask(c.Request().Context(), body)
+	if err != nil {
+		log.Error().Err(err).Msg("")
+		return response.ErrInternalServer.EchoError(c)
+	}
+
+	return c.JSON(http.StatusCreated, res)
+}
+	
 func (ctrl *TodoController) GetAll(c echo.Context) error {
 	todos, err := ctrl.svc.FetchAllTasks(c.Request().Context())
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		
+		return response.ErrInternalServer.EchoError(c)
 	}
 	return c.JSON(http.StatusOK, todos)
 }
 
-// PUT /todos/:id
 func (ctrl *TodoController) Update(c echo.Context) error {
-    id, _ := strconv.Atoi(c.Param("id"))
+	id, _ := strconv.Atoi(c.Param("id"))
+	var body = new(request.UpdateStatusRequest)
 
-	type StatusUpdate struct {
-        Status string `json:"status"`
-    }
+	if err := c.Bind(body); err != nil {
+		log.Error().Err(err).Uint("id", uint(id)).Msg("")
+		return response.ErrBadRequest.EchoError(c)
+	} else if err := c.Validate(body); err != nil {
+		log.Warn().Err(err).Uint("id", uint(id)).Msg("")
+		return response.ErrBadRequest.EchoError(c)
+	}
 
-    var input StatusUpdate
+	err := ctrl.svc.UpdateTaskStatus(c.Request().Context(), uint(id), body.Status)
+	if err != nil {
+		log.Error().Err(err).Uint("id", uint(id)).Msg("")
+		return response.ErrInternalServer.EchoError(c)
+	}
 
-    if err := c.Bind(&input); err != nil {
-		return c.JSON(http.StatusBadRequest, "Invalid JSON")
-    }
-
-    if input.Status == "" {
-        return c.JSON(http.StatusBadRequest, "error The 'status' field is required")
-    }
-
-    err := ctrl.svc.UpdateTaskStatus(c.Request().Context(), uint(id), input.Status)
-    if err != nil {
-		return c.JSON(http.StatusInternalServerError, err.Error())
-    }
-
-    return c.JSON(http.StatusOK, "updated")
+	return c.JSON(http.StatusOK, "updated")
 }
 
-// Delete /todos/:id
 func (ctrl *TodoController) Delete(c echo.Context) error {
 	id, _ := strconv.Atoi(c.Param("id"))
 
-	var input entity.Todo
-	if err := c.Bind(&input); err != nil {
-		return c.JSON(http.StatusBadRequest, "Invalid Request")
-	}
-
 	err := ctrl.svc.RemoveTask(c.Request().Context(), uint(id))
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, err.Error())
+		log.Error().Err(err).Uint("id", uint(id)).Msg("")
+		return response.ErrInternalServer.EchoError(c)
 	}
 
 	return c.JSON(http.StatusOK, "Deleted")

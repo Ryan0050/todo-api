@@ -11,8 +11,4 @@ type TodoRepository interface {
 	GetByID(ctx context.Context, id uint) (*entity.Todo, error)
 	Update(ctx context.Context, todo *entity.Todo) error
 	Delete(ctx context.Context, id uint) error
-	
-	SetCache(ctx context.Context, key string, todos []entity.Todo) error
-	GetCache(ctx context.Context, key string) ([]entity.Todo, error)
-	DeleteCache(ctx context.Context, key string) error
 }

@@ -1,66 +1,62 @@
 package main
 
 import (
-	"fmt"
-	"todo-api/config" // Import your new config package
-	"todo-api/internal/controller"
-	"todo-api/internal/entity"
-	"todo-api/internal/repository"
-	"todo-api/internal/service"
+    "net/http"
+    "todo-api/config"
+    "todo-api/internal/controller"
+    "todo-api/internal/repository"
+    "todo-api/internal/service"
 
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	"github.com/rs/zerolog/log"
-	"gorm.io/driver/postgres"
-	"gorm.io/gorm"
+    "github.com/go-playground/validator/v10"
+    "github.com/labstack/echo/v4"
+    "github.com/labstack/echo/v4/middleware"
+    "github.com/rs/zerolog/log"
 )
 
+type RequestValidator struct {
+    validator *validator.Validate
+}
+
+func (rv *RequestValidator) Validate(i interface{}) error {
+    if err := rv.validator.Struct(i); err != nil {
+        return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+    }
+    return nil
+}
+
 func main() {
-	// 1. Load configuration from .env
-	config.LoadConfig()
+    config.LoadConfig()
+    
+    // Initialize DB & Redis (Assuming these return your GORM/Redis clients)
+    var db = config.InitConnectDB(
+        config.PostgreSQLConfig.PostgreSQLHost, 
+        config.PostgreSQLConfig.PostgreSQLUser, 
+        config.PostgreSQLConfig.PostgreSQLPassword, 
+        config.PostgreSQLConfig.PostgreSQLDBName, 
+        config.PostgreSQLConfig.PostgreSQLDBSchema, 
+        config.PostgreSQLConfig.PostgreSQLPort,
+    )
 
-	// 2. Setup Postgres using Environment Variables
-	// We use os.Getenv to pull the values you defined in your .env file
-	dsn := fmt.Sprintf("host=%s user=%s password=%s dbname=%s port=%s sslmode=disable",
-		config.DBConfig.Host,
-		config.DBConfig.User,
-		config.DBConfig.Pass,
-		config.DBConfig.Name,
-		config.DBConfig.Port,
-	)
+    if db == nil {
+        log.Fatal().Msg("Database connection is null")
+    }
 
-	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	if err != nil {
-		log.Fatal().Err(err).Msg("Failed to connect to Postgres")
-	}
+    rdb := config.GetRedisConnection()
 
-	// 3. Run Migrations (Adds 'todos' table alongside 'channel_configs')
-	db.AutoMigrate(&entity.Todo{})
+	
+    e := echo.New()
+    
+    e.Use(middleware.Logger())
+    e.Use(middleware.Recover())
+	
+    e.Validator = &RequestValidator{validator: validator.New()}
+	
+    todoRepo := repository.NewTodoRepository(db)
+    todoSvc := service.NewTodoService(todoRepo, rdb)
+    todoCtrl := controller.NewTodoController(todoSvc)
 
-	// 4. Initialize Redis Connection
-	// This uses the singleton and the RedisConfig struct you just loaded
-	rdb := config.GetRedisConnection()
+    todoCtrl.Routes(e)
 
-	// 5. Dependency Injection
-	todoRepo := repository.NewTodoRepository(db, rdb)
-	todoSvc := service.NewTodoService(todoRepo)
-	todoCtrl := controller.NewTodoController(todoSvc)
-
-	// 6. Echo Setup
-	e := echo.New()
-	e.Use(middleware.Logger())
-	e.Use(middleware.Recover())
-
-	// Routes
-	api := e.Group("/api/v1")
-	{
-		api.POST("/todos", todoCtrl.Create)
-		api.GET("/todos", todoCtrl.GetAll)
-		api.PUT("/todos/:id", todoCtrl.Update)
-		api.DELETE("/todos/:id", todoCtrl.Delete)
-	}
-
-	// Start Server
-	log.Info().Msg("Server is running on :8080")
-	e.Logger.Fatal(e.Start(":8080"))
+    log.Info().Msg("Server is running on :8080")
+    e.Logger.Fatal(e.Start(":8080"))
 }
